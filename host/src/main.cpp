@@ -10,7 +10,7 @@ using namespace aocl_utils;
 
 #define STRING_BUFFER_LEN 1024
 
-static const size_t work_group_size = 8;
+#define GROUP_SIZE 32
 
 // OpenCL runtime configuration
 static cl_platform_id platform = NULL;
@@ -35,21 +35,21 @@ int outputsCount;
 int connsCount;
 int layersCount;
 vector<double> weights;
-vector<double> srcConns;
-vector<double> tgtConns;
-vector<double> endConns;
-vector<double> endNodes;
+vector<int> srcConns;
+vector<int> tgtConns;
+vector<int> endConns;
+vector<int> endNodes;
 vector<double> input;
 double* output;
 vector<double> outputIds;
 
 scoped_aligned_ptr<double> weightsAligned;
-scoped_aligned_ptr<double> srcConnsAligned;
-scoped_aligned_ptr<double> tgtConnsAligned;
-scoped_aligned_ptr<double> endConnsAligned;
-scoped_aligned_ptr<double> endNodesAligned;
+scoped_aligned_ptr<int> srcConnsAligned;
+scoped_aligned_ptr<int> tgtConnsAligned;
+scoped_aligned_ptr<int> endConnsAligned;
+scoped_aligned_ptr<int> endNodesAligned;
 scoped_aligned_ptr<double> inputValuesAligned;
-scoped_aligned_ptr<double> outputIdsAligned;
+scoped_aligned_ptr<int> outputIdsAligned;
 scoped_aligned_ptr<double> outputsAligned;
 
 vector<vector<double>> validationSet;
@@ -170,6 +170,7 @@ int main() {
 	}
 
 	initAligned();
+	return true;
 }
 
 void initAligned()
@@ -274,22 +275,22 @@ bool initOpencl() {
 
   // connection source ids input buffer.
   write_buf_src_conns = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        connsCount * sizeof(double), NULL, &status);
+        connsCount * sizeof(int), NULL, &status);
   checkError(status, "Failed to create buffer for connection source ids input");
 
   // connection target ids input buffer.
   write_buf_tgt_conns = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        connsCount * sizeof(double), NULL, &status);
+        connsCount * sizeof(int), NULL, &status);
   checkError(status, "Failed to create buffer for connection target ids input");
 
   // layer's end connections ids input buffer.
   write_buf_end_conns = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        layersCount * sizeof(double), NULL, &status);
+        layersCount * sizeof(int), NULL, &status);
   checkError(status, "Failed to create buffer for layer's end connections ids input");
 
   // layer's end nodes ids input buffer.
   write_buf_end_nodes = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        layersCount * sizeof(double), NULL, &status);
+        layersCount * sizeof(int), NULL, &status);
   checkError(status, "Failed to create buffer for layer's end nodes ids input");
 
   // input values buffer.
@@ -299,7 +300,7 @@ bool initOpencl() {
 
   // output ids buffer.
   write_buf_output_ids = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        outputsCount * sizeof(double), NULL, &status);
+        outputsCount * sizeof(int), NULL, &status);
   checkError(status, "Failed to create buffer for output ids input");
 
   // outputs buffer.
@@ -319,37 +320,37 @@ void run()
     // Transfer inputs to each device. Each of the host buffers supplied to
     // clEnqueueWriteBuffer here is already aligned to ensure that DMA is used
     // for the host-to-device transfer.
-//    cl_event write_event[7];
+    cl_event write_event[7];
     status = clEnqueueWriteBuffer(queue, write_buf_weights, CL_FALSE,
-        0, connsCount * sizeof(double), weightsAligned, 0, NULL, NULL);
+        0, connsCount * sizeof(double), weightsAligned, 0, NULL, &write_event[0]);
     checkError(status, "Failed to transfer weights");
 
     status = clEnqueueWriteBuffer(queue, write_buf_src_conns, CL_FALSE,
-        0, connsCount * sizeof(double), srcConnsAligned, 0, NULL, NULL);
+        0, connsCount * sizeof(int), srcConnsAligned, 0, NULL, &write_event[1]);
     checkError(status, "Failed to transfer source connection ids");
 
 	status = clEnqueueWriteBuffer(queue, write_buf_tgt_conns, CL_FALSE,
-        0, connsCount * sizeof(double), tgtConnsAligned, 0, NULL, NULL);
+        0, connsCount * sizeof(int), tgtConnsAligned, 0, NULL, &write_event[2]);
     checkError(status, "Failed to transfer target connection ids");
 
 	status = clEnqueueWriteBuffer(queue, write_buf_end_conns, CL_FALSE,
-        0, layersCount * sizeof(double), endConnsAligned, 0, NULL, NULL);
+        0, layersCount * sizeof(int), endConnsAligned, 0, NULL, &write_event[3]);
     checkError(status, "Failed to transfer target connection ids");
 
 	status = clEnqueueWriteBuffer(queue, write_buf_end_nodes, CL_FALSE,
-        0, layersCount * sizeof(double), endNodesAligned, 0, NULL, NULL);
+        0, layersCount * sizeof(int), endNodesAligned, 0, NULL, &write_event[4]);
     checkError(status, "Failed to transfer target connection ids");
 
 	status = clEnqueueWriteBuffer(queue, write_buf_output_ids, CL_FALSE,
-        0, outputsCount * sizeof(double), outputIdsAligned, 0, NULL, NULL);
+        0, outputsCount * sizeof(int), outputIdsAligned, 0, NULL, &write_event[5]);
     checkError(status, "Failed to transfer target connection ids");
 
 	status = clEnqueueWriteBuffer(queue, write_buf_input_values, CL_FALSE,
-        0, inputsCount * sizeof(double), inputValuesAligned, 0, NULL, NULL);
+        0, inputsCount * sizeof(double), inputValuesAligned, 0, NULL, &write_event[6]);
     checkError(status, "Failed to transfer target connection ids");
 
 	// Wait for all queues to finish.
-	clFinish(queue);
+//	clFinish(queue);
 
   // Set kernel arguments.
   unsigned argi = 0;
@@ -410,29 +411,29 @@ void run()
   printf("Launching the kernel...\n\n");
 
   // Configure work set over which the kernel will execute
-  size_t wgSize[3] = {work_group_size, 1, 1};
-  size_t gSize[3] = {work_group_size, 1, 1};
+  const size_t global_work_size = GROUP_SIZE;
+  const size_t local_work_size = GROUP_SIZE;
 
   scoped_array<cl_event> kernel_event(1);
   scoped_array<cl_event> finish_event(1);
 
   // Launch the kernel
-  status = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, gSize, wgSize, 0, NULL, kernel_event);
+  status = clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &global_work_size, &local_work_size, 7, write_event, &kernel_event[0]);
   checkError(status, "Failed to launch kernel");
 
     // Read the result. This the final operation.
   status = clEnqueueReadBuffer(queue, output_buf, CL_FALSE,
-        0, outputsCount * sizeof(float), outputsAligned, 1, kernel_event, finish_event);
+        0, outputsCount * sizeof(double), outputsAligned, 1, &kernel_event[0], &finish_event[0]);
   checkError(status, "Failed to launch kernel");
 
     // Release local events.
-//    clReleaseEvent(write_event[0]);
-//    clReleaseEvent(write_event[1]);
-//    clReleaseEvent(write_event[2]);
-//    clReleaseEvent(write_event[3]);
-//    clReleaseEvent(write_event[4]);
-//    clReleaseEvent(write_event[5]);
-//	clReleaseEvent(write_event[6]);
+    clReleaseEvent(write_event[0]);
+    clReleaseEvent(write_event[1]);
+    clReleaseEvent(write_event[2]);
+    clReleaseEvent(write_event[3]);
+    clReleaseEvent(write_event[4]);
+    clReleaseEvent(write_event[5]);
+	clReleaseEvent(write_event[6]);
 
   // Wait for command queue to complete pending events
   clWaitForEvents(1, finish_event);
@@ -447,18 +448,42 @@ void run()
 
 // Free the resources allocated during initialization
 void cleanup() {
-  if(kernel) {
-    clReleaseKernel(kernel);  
-  }
-  if(program) {
-    clReleaseProgram(program);
-  }
-  if(queue) {
-    clReleaseCommandQueue(queue);
-  }
-  if(context) {
-    clReleaseContext(context);
-  }
+	if(kernel) {
+	clReleaseKernel(kernel);  
+	}
+	if(write_buf_weights) {
+		clReleaseMemObject(write_buf_weights);
+	}
+	if(write_buf_src_conns) {
+		clReleaseMemObject(write_buf_src_conns);
+	}
+	if(write_buf_end_conns) {
+		clReleaseMemObject(write_buf_end_conns);
+	}
+	if(write_buf_tgt_conns) {
+		clReleaseMemObject(write_buf_tgt_conns);
+	}
+	if(write_buf_end_nodes) {
+		clReleaseMemObject(write_buf_end_nodes);
+	}
+	if(write_buf_input_values) {
+		clReleaseMemObject(write_buf_input_values);
+	}
+	if(write_buf_output_ids) {
+		clReleaseMemObject(write_buf_output_ids);
+	}
+	if(output_buf) {
+		clReleaseMemObject(output_buf);
+	}
+	if(program) {
+	clReleaseProgram(program);
+	}
+	if(queue) {
+	clReleaseCommandQueue(queue);
+	}
+	if(context) {
+	clReleaseContext(context);
+	}
 }
 
 // Helper functions to display parameters returned by OpenCL queries
