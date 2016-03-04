@@ -10,7 +10,7 @@ using namespace aocl_utils;
 
 #define STRING_BUFFER_LEN 1024
 
-#define GROUP_SIZE 32
+#define GROUP_SIZE 1
 
 // OpenCL runtime configuration
 static cl_platform_id platform = NULL;
@@ -34,25 +34,25 @@ int inputsCount;
 int outputsCount;
 int connsCount;
 int layersCount;
-vector<double> weights;
+vector<float> weights;
 vector<int> srcConns;
 vector<int> tgtConns;
 vector<int> endConns;
 vector<int> endNodes;
-vector<double> input;
-double* output;
-vector<double> outputIds;
+vector<float> input;
+float* output;
+vector<float> outputIds;
 
-scoped_aligned_ptr<double> weightsAligned;
+scoped_aligned_ptr<float> weightsAligned;
 scoped_aligned_ptr<int> srcConnsAligned;
 scoped_aligned_ptr<int> tgtConnsAligned;
 scoped_aligned_ptr<int> endConnsAligned;
 scoped_aligned_ptr<int> endNodesAligned;
-scoped_aligned_ptr<double> inputValuesAligned;
+scoped_aligned_ptr<float> inputValuesAligned;
 scoped_aligned_ptr<int> outputIdsAligned;
-scoped_aligned_ptr<double> outputsAligned;
+scoped_aligned_ptr<float> outputsAligned;
 
-vector<vector<double>> validationSet;
+vector<vector<float>> validationSet;
 
 // Function prototypes
 bool init();
@@ -138,10 +138,10 @@ int main() {
 		printf("Failed to open validation dataset.");
 		return false;
 	}
-	double feature;
+	float feature;
 	while(getline(vs_infile, line)) {
 		stringstream ssIrisDatasetLine(line);
-		vector<double> row;
+		vector<float> row;
 		while (ssIrisDatasetLine >> feature)
 		{
 			//printf((line + "\n").c_str());
@@ -270,7 +270,7 @@ bool initOpencl() {
 
   // weights input buffer.
   write_buf_weights = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        connsCount * sizeof(double), NULL, &status);
+        connsCount * sizeof(float), NULL, &status);
   checkError(status, "Failed to create buffer for weights input");
 
   // connection source ids input buffer.
@@ -295,7 +295,7 @@ bool initOpencl() {
 
   // input values buffer.
   write_buf_input_values = clCreateBuffer(context, CL_MEM_READ_ONLY, 
-        inputsCount * sizeof(double), NULL, &status);
+        inputsCount * sizeof(float), NULL, &status);
   checkError(status, "Failed to create buffer for input values");
 
   // output ids buffer.
@@ -305,7 +305,7 @@ bool initOpencl() {
 
   // outputs buffer.
   output_buf = clCreateBuffer(context, CL_MEM_WRITE_ONLY, 
-        outputsCount * sizeof(double), NULL, &status);
+        outputsCount * sizeof(float), NULL, &status);
   checkError(status, "Failed to create buffer for output values");
 
   return true;
@@ -322,7 +322,7 @@ void run()
     // for the host-to-device transfer.
     cl_event write_event[7];
     status = clEnqueueWriteBuffer(queue, write_buf_weights, CL_FALSE,
-        0, connsCount * sizeof(double), weightsAligned, 0, NULL, &write_event[0]);
+        0, connsCount * sizeof(float), weightsAligned, 0, NULL, &write_event[0]);
     checkError(status, "Failed to transfer weights");
 
     status = clEnqueueWriteBuffer(queue, write_buf_src_conns, CL_FALSE,
@@ -346,7 +346,7 @@ void run()
     checkError(status, "Failed to transfer target connection ids");
 
 	status = clEnqueueWriteBuffer(queue, write_buf_input_values, CL_FALSE,
-        0, inputsCount * sizeof(double), inputValuesAligned, 0, NULL, &write_event[6]);
+        0, inputsCount * sizeof(float), inputValuesAligned, 0, NULL, &write_event[6]);
     checkError(status, "Failed to transfer target connection ids");
 
 	// Wait for all queues to finish.
@@ -423,7 +423,7 @@ void run()
 
     // Read the result. This the final operation.
   status = clEnqueueReadBuffer(queue, output_buf, CL_FALSE,
-        0, outputsCount * sizeof(double), outputsAligned, 1, &kernel_event[0], &finish_event[0]);
+        0, outputsCount * sizeof(float), outputsAligned, 1, &kernel_event[0], &finish_event[0]);
   checkError(status, "Failed to launch kernel");
 
     // Release local events.
